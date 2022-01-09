@@ -33,7 +33,6 @@ from pytorch_lightning.trainer.connectors.logger_connector.result import (
     _ResultMetric,
     _Sync,
 )
-from pytorch_lightning.utilities.imports import _fault_tolerant_training
 from tests.helpers import BoringModel
 from tests.helpers.runif import RunIf
 
@@ -371,15 +370,9 @@ class DummyMeanMetric(Metric):
         return f"{self.__class__.__name__}(sum={self.sum}, count={self.count})"
 
 
-def result_collection_reload(**kwargs):
-
+def result_collection_reload(devices=1, **kwargs):
     """This test is going to validate _ResultCollection is properly being reload and final accumulation with Fault
     Tolerant Training is correct."""
-
-    if not _fault_tolerant_training():
-        pytest.skip("Fault tolerant not available")
-
-    num_processes = kwargs.get("gpus", 1)
 
     class CustomException(Exception):
         pass
@@ -415,7 +408,7 @@ def result_collection_reload(**kwargs):
                 # On failure, the Metric states are being accumulated on rank 0 and zeroed-out on other ranks.
                 # The shift indicates we failed while the state was `shift=sign(is_global_zero > 0) * [0..3]`
                 shift = 0
-                if num_processes == 2:
+                if devices == 2:
                     shift = 3 if self.trainer.is_global_zero else -3
                 expected = sum(range(batch_idx + 1)) + shift
                 assert expected == value == value_2
@@ -440,7 +433,7 @@ def result_collection_reload(**kwargs):
 
         def on_epoch_end(self) -> None:
             if self.trainer.fit_loop.restarting:
-                total = sum(range(5)) * num_processes
+                total = sum(range(5)) * devices
                 metrics = self.results.metrics(on_step=False)
                 assert self.results["training_step.tracking"].value == total
                 assert metrics["callback"]["tracking"] == self.dummy_metric.compute() == 2
@@ -459,7 +452,7 @@ def result_collection_reload(**kwargs):
 
     tmpdir = (
         trainer.strategy.broadcast(trainer_kwargs["default_root_dir"], 0)
-        if num_processes >= 2
+        if devices >= 2
         else trainer_kwargs["default_root_dir"]
     )
     ckpt_path = os.path.join(tmpdir, ".pl_auto_save.ckpt")
@@ -477,13 +470,13 @@ def test_result_collection_reload(tmpdir):
 @RunIf(min_gpus=1)
 @mock.patch.dict(os.environ, {"PL_FAULT_TOLERANT_TRAINING": "1"})
 def test_result_collection_reload_1_gpu_ddp(tmpdir):
-    result_collection_reload(default_root_dir=tmpdir, strategy="ddp", gpus=1)
+    result_collection_reload(default_root_dir=tmpdir, strategy="ddp", accelerator="gpu")
 
 
 @RunIf(min_gpus=2, standalone=True)
 @mock.patch.dict(os.environ, {"PL_FAULT_TOLERANT_TRAINING": "1"})
 def test_result_collection_reload_2_gpus(tmpdir):
-    result_collection_reload(default_root_dir=tmpdir, strategy="ddp", gpus=2)
+    result_collection_reload(default_root_dir=tmpdir, strategy="ddp", accelerator="gpu", devices=2)
 
 
 def test_metric_collections(tmpdir):
