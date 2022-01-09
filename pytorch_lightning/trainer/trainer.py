@@ -2342,7 +2342,8 @@ class Trainer(
 
     @property
     def current_epoch(self) -> int:
-        return self.fit_loop.current_epoch
+        """The current epoch, updated after the epoch end hooks are run."""
+        return self.fit_loop.epoch_progress.current.completed
 
     @property
     def max_epochs(self) -> int:

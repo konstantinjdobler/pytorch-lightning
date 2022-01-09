@@ -980,14 +980,17 @@ def test_checkpoint_repeated_strategy_extended(tmpdir):
         trainer.fit(model, ckpt_path=chk)
         assert trainer.global_step == epochs * limit_train_batches
         assert trainer.current_epoch == epochs
+        assert trainer.fit_loop.epoch_progress.current.processed == epochs
 
         trainer.validate(model)
         assert trainer.global_step == epochs * limit_train_batches
         assert trainer.current_epoch == epochs
+        assert trainer.fit_loop.epoch_progress.current.processed == epochs
 
         trainer.fit(model)
         assert trainer.global_step == epochs * limit_train_batches
         assert trainer.current_epoch == epochs
+        assert trainer.fit_loop.epoch_progress.current.processed == epochs
         assert_checkpoint_log_dir(idx)
 
 

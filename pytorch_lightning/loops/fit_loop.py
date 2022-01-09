@@ -57,16 +57,6 @@ class FitLoop(Loop[None]):
         self._outputs: _EPOCH_OUTPUTS_TYPE = []
 
     @property
-    def current_epoch(self) -> int:
-        """Return the current epoch."""
-        return self.epoch_progress.current.completed
-
-    @current_epoch.setter
-    def current_epoch(self, value: int) -> None:
-        """Setter for the current epoch."""
-        self.epoch_progress.current.completed = value
-
-    @property
     def global_step(self) -> int:
         """Returns the global step."""
         return self.epoch_loop.global_step
@@ -129,6 +119,18 @@ class FitLoop(Loop[None]):
         """Returns the running loss."""
         return self.epoch_loop.batch_loop.running_loss
 
+    @Loop.restarting.setter
+    def restarting(self, restarting: bool) -> None:
+        # if the last epoch completely finished, we are not actually restarting, we can check this to see if all
+        # current values are equal
+        values = (
+            self.epoch_progress.current.ready,
+            self.epoch_progress.current.started,
+            self.epoch_progress.current.processed,
+        )
+        restarting &= any(v != self.epoch_progress.current.completed for v in values)
+        Loop.restarting.fset(self, restarting)  # call the parent setter
+
     @property
     def _skip_backward(self) -> bool:
         """Determines whether the loop will skip backward during automatic optimization."""
@@ -152,11 +154,11 @@ class FitLoop(Loop[None]):
         """Evaluates when to leave the loop."""
         # TODO(@awaelchli): Move track steps inside training loop and move part of these condition inside training loop
         stop_steps = _is_max_limit_reached(self.global_step, self.max_steps)
-        stop_epochs = _is_max_limit_reached(self.current_epoch, self.max_epochs)
+        stop_epochs = _is_max_limit_reached(self.epoch_progress.current.processed, self.max_epochs)
 
         should_stop = self.trainer.should_stop
         if should_stop:
-            should_stop = self.current_epoch >= self.min_epochs if self.min_epochs else True
+            should_stop = self.epoch_progress.current.processed >= self.min_epochs if self.min_epochs else True
             if not should_stop:
                 log.info(
                     f"Trainer was signaled to stop but required minimum epochs ({self.min_epochs}) has not been met."
@@ -169,7 +171,7 @@ class FitLoop(Loop[None]):
         """Whether we should skip the training and immediately return from the call to :meth:`run`."""
         # since `trainer.num_training_batches` depends on the `train_dataloader` but that won't be called
         # until `on_run_start`, we use `limit_train_batches` instead
-        return self.done or self.trainer.limit_train_batches == 0
+        return self.trainer.limit_train_batches == 0
 
     def connect(self, epoch_loop: TrainingEpochLoop) -> None:  # type: ignore[override]
         """Connects a training epoch loop to this fit loop."""
@@ -207,7 +209,7 @@ class FitLoop(Loop[None]):
             getattr(self.trainer.train_dataloader.sampler, "set_epoch", None)
         ):
             # set seed for distributed sampler (enables shuffling for each epoch)
-            self.trainer.train_dataloader.sampler.set_epoch(self.current_epoch)
+            self.trainer.train_dataloader.sampler.set_epoch(self.epoch_progress.current.processed)
 
         # changing gradient according accumulation_scheduler
         self.trainer.accumulation_scheduler.on_train_epoch_start(self.trainer, self.trainer.lightning_module)

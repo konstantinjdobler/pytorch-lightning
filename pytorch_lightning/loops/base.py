@@ -48,7 +48,7 @@ class Loop(ABC, Generic[T]):
     """
 
     def __init__(self) -> None:
-        self.restarting = False
+        self._restarting = False
         self._trainer: Optional["pl.Trainer"] = None
 
     @property
@@ -68,6 +68,17 @@ class Loop(ABC, Generic[T]):
         for v in self.__dict__.values():
             if isinstance(v, Loop):
                 v.trainer = trainer
+
+    @property
+    def restarting(self) -> bool:
+        return self._restarting
+
+    @restarting.setter
+    def restarting(self, restarting: bool) -> None:
+        self._restarting = restarting
+        for loop in vars(self).values():
+            if isinstance(loop, Loop):
+                loop.restarting = restarting
 
     @property
     @abstractmethod
@@ -189,7 +200,7 @@ class Loop(ABC, Generic[T]):
                 self.on_advance_start(*args, **kwargs)
                 self.advance(*args, **kwargs)
                 self.on_advance_end()
-                self.restarting = False
+                self._restarting = False
             except StopIteration:
                 break
 
@@ -298,6 +309,7 @@ class Loop(ABC, Generic[T]):
         for k, v in self.__dict__.items():
             if isinstance(v, Loop):
                 v.load_state_dict(state_dict.copy(), prefix + k + ".")
+        self.restarting = True
 
     def _load_from_state_dict(self, state_dict: Dict, prefix: str, metrics: Optional[Dict[str, Metric]] = None) -> None:
         for k, v in self.__dict__.items():
@@ -333,4 +345,3 @@ class Loop(ABC, Generic[T]):
 
         if prefix + "state_dict" in state_dict:  # compatibility with old checkpoints
             self.on_load_checkpoint(state_dict[prefix + "state_dict"])
-        self.restarting = True

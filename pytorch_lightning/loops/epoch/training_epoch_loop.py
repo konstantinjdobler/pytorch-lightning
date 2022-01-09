@@ -88,7 +88,7 @@ class TrainingEpochLoop(loops.Loop[_OUTPUTS_TYPE]):
         """Returns the current batch index (within this epoch)"""
         # use `ready` instead of `completed` in case this is accessed after `completed` has been increased
         # but before the next `ready` increase
-        return self.batch_progress.current.ready - 1
+        return max(self.batch_progress.current.ready - 1, 0)
 
     @property
     def _is_training_done(self) -> bool:
@@ -130,12 +130,6 @@ class TrainingEpochLoop(loops.Loop[_OUTPUTS_TYPE]):
             self.batch_progress.reset_on_restart()
             self.scheduler_progress.reset_on_restart()
             self.batch_loop.optimizer_loop.optim_progress.reset_on_restart()
-        # FIXME: fuck me this makes
-        # 1) test_restore::test_correct_step_and_epoch pass
-        # 2) test_model_checkpoint::test_checkpoint_repeated_strategy_extended fail
-        # 1) restarts after on_train_end (ce: 2, gs: 4) -> (ce: 4, gs: 8)
-        # 2) restarts after on_train_epoch_end (ce: 1, gs: 4) -> (ce: 2, gs: 4)
-        # if not self.restarting or self.done:
         else:
             self.batch_progress.reset_on_run()
             self.scheduler_progress.reset_on_run()
@@ -148,7 +142,7 @@ class TrainingEpochLoop(loops.Loop[_OUTPUTS_TYPE]):
 
     def on_run_start(self, data_fetcher: AbstractDataFetcher) -> None:  # type: ignore[override]
         self._reload_dataloader_state_dict(data_fetcher)
-        self._dataloader_iter = _update_dataloader_iter(data_fetcher, self.batch_idx + 1)
+        self._dataloader_iter = _update_dataloader_iter(data_fetcher, self.batch_idx)
 
     def advance(self, data_fetcher: AbstractDataFetcher) -> None:  # type: ignore[override]
         """Runs a single training batch.
@@ -159,6 +153,9 @@ class TrainingEpochLoop(loops.Loop[_OUTPUTS_TYPE]):
         if self.restarting and self._should_check_val_fx(self.batch_idx, self.batch_progress.is_last_batch):
             # skip training and run validation in `on_advance_end`
             return
+        else:
+            # we are going to train first so the val loop does not need to restart
+            self.val_loop.restarting = False
 
         assert self._dataloader_iter is not None
         batch_idx, (batch, self.batch_progress.is_last_batch) = next(self._dataloader_iter)
