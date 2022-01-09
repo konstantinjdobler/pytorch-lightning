@@ -332,6 +332,7 @@ class CheckpointConnector:
         model = self.trainer.lightning_module
 
         checkpoint = {
+            # the epoch is saved for compatibility but it's not relevant for restoration
             "epoch": self.trainer.current_epoch,
             "global_step": self.trainer.global_step + 1,
             "pytorch-lightning_version": pl.__version__,
